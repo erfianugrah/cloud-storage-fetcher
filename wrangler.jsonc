@@ -1,0 +1,125 @@
+/**
+ * SIGNED STORAGE WORKER CONFIGURATION
+ * ==================================
+ * 
+ * This file configures your Cloudflare Worker for serving signed content from AWS S3 
+ * and Google Cloud Storage (GCS) with intelligent caching. Edit the values below to 
+ * match your specific requirements.
+ * 
+ * CONFIGURATION ASSISTANCE:
+ * - Run the configuration wizard: npm run config
+ * - Read the Worker documentation: https://developers.cloudflare.com/workers/
+ * - Wrangler configuration reference: https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "signed-storage",
+	"main": "src/index.js",
+	"compatibility_date": "2025-03-03",
+	"observability": {
+		"enabled": true
+	},
+	
+	/**
+	 * ENVIRONMENT VARIABLES
+	 * ===================
+	 * These variables configure your worker's behavior. Required variables
+	 * must be set for the worker to function properly.
+	 */
+	"vars": {
+		/** 
+		 * REQUIRED CONFIGURATION 
+		 * ======================
+		 * These settings are essential for the worker to function.
+		 */
+		
+		/**
+		 * DEFAULT_PROVIDER: The storage provider to use when no provider
+		 * is specified in the URL path.
+		 * Valid values: "s3" or "gcs"
+		 */
+		"DEFAULT_PROVIDER": "s3",
+		
+		/**
+		 * S3 CONFIGURATION
+		 * ---------------
+		 * Settings for Amazon S3 access
+		 */
+		"S3_BUCKET": "your-s3-bucket-name",  // S3 bucket to serve content from
+		"AWS_REGION": "us-east-1",           // AWS region where your bucket is located
+		
+		/**
+		 * GCS CONFIGURATION
+		 * ----------------
+		 * Settings for Google Cloud Storage access
+		 */
+		"GCS_BUCKET": "your-gcs-bucket-name", // GCS bucket to serve content from
+		
+		/** 
+		 * OPTIONAL CONFIGURATION 
+		 * ====================
+		 * Customize these settings as needed. Uncomment any option you want to change
+		 * from its default value.
+		 */
+		
+		/**
+		 * URL PATH ROUTING
+		 * ---------------
+		 * Configure how URLs map to storage providers
+		 */
+		// "S3_URL_PREFIX": "/s3/",   // URL path prefix for S3 content (default: "/s3/")
+		// "GCS_URL_PREFIX": "/gcs/", // URL path prefix for GCS content (default: "/gcs/")
+		
+		/**
+		 * HEALTH CHECK
+		 * -----------
+		 * Configure the health check endpoint
+		 */
+		// "HEALTH_CHECK_PATH": "/__health", // Health check endpoint path (default: "/__health")
+		
+		/**
+		 * PERFORMANCE SETTINGS
+		 * -------------------
+		 * Configure caching and timeouts
+		 */
+		// "DEFAULT_CACHE_TTL": 60,    // Default cache time in seconds (default: 60)
+		// "FETCH_TIMEOUT": 30000,     // Request timeout in milliseconds (default: 30000)
+		
+		/**
+		 * DEBUGGING
+		 * ---------
+		 * Configure debugging and logging
+		 */
+		// "DEBUG_MODE": false,       // Set to true to enable debug information (default: false)
+		// "ENABLE_LOGGING": false,   // Set to true to enable detailed logging (default: false)
+		
+		/**
+		 * ADVANCED CONFIGURATION
+		 * =====================
+		 * For advanced settings, run the configuration wizard with: npm run config
+		 * 
+		 * Available advanced options include:
+		 * - Custom cache configuration for different file types (CACHE_CONFIG)
+		 * - Custom headers handling (HEADERS_TO_REMOVE)
+		 * - Custom endpoints for S3 and GCS (S3_ENDPOINT, GCS_ENDPOINT)
+		 * - Path prefixes for storage access (S3_PATH_PREFIX, GCS_PATH_PREFIX)
+		 * - Custom provider routing rules (PROVIDER_MAPPINGS)
+		 * - Error response format (ERROR_FORMAT)
+		 */
+	}
+	
+	/**
+	 * SECURITY CREDENTIALS
+	 * ===================
+	 * IMPORTANT: Never add sensitive credentials to this file!
+	 * 
+	 * Set up your credentials securely using Wrangler secrets:
+	 * 
+	 * wrangler secret put AWS_ACCESS_KEY_ID
+	 * wrangler secret put AWS_SECRET_ACCESS_KEY
+	 * wrangler secret put GCS_ACCESS_KEY_ID
+	 * wrangler secret put GCS_SECRET_ACCESS_KEY
+	 * 
+	 * Learn more about secrets: https://developers.cloudflare.com/workers/wrangler/commands/#secret
+	 */
+}
