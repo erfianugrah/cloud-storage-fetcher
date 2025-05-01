@@ -1,6 +1,6 @@
 # Signed Storage Worker
 
-A Cloudflare Worker for serving signed content from AWS S3 and Google Cloud Storage (GCS) with intelligent caching.
+A Cloudflare Worker for serving signed content from AWS S3, Google Cloud Storage (GCS), Cloudflare R2, and Azure Blob Storage with intelligent caching.
 
 ## Table of Contents
 
@@ -26,7 +26,8 @@ A Cloudflare Worker for serving signed content from AWS S3 and Google Cloud Stor
 
 ## Features
 
-- **Unified Authentication** - Uses HMAC signing for both S3 and GCS through the `aws4fetch` library
+- **Multiple Cloud Providers** - Support for AWS S3, Google Cloud Storage, Cloudflare R2, and Azure Blob Storage
+- **Flexible Authentication** - AWS SignV4 for S3-compatible services and Azure authentication methods
 - **Smart Caching** - Configurable caching rules based on asset types
 - **Provider Abstraction** - Common interface for multiple storage providers
 - **Path-Based Routing** - Route requests to different storage providers based on URL paths
@@ -41,7 +42,11 @@ A Cloudflare Worker for serving signed content from AWS S3 and Google Cloud Stor
 - [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 - Cloudflare Workers account
-- AWS S3 or GCS credentials
+- Credentials for one or more storage providers:
+  - AWS S3 credentials (Access Key ID and Secret)
+  - GCS credentials (Access Key ID and Secret for S3 interoperability)
+  - Cloudflare R2 credentials (Access Key ID and Secret)
+  - Azure Blob Storage credentials (Account Key or SAS token)
 
 ### Installation
 
@@ -64,10 +69,24 @@ A Cloudflare Worker for serving signed content from AWS S3 and Google Cloud Stor
 
 4. Configure secrets:
    ```bash
+   # AWS S3
    wrangler secret put AWS_ACCESS_KEY_ID
    wrangler secret put AWS_SECRET_ACCESS_KEY
+   
+   # Google Cloud Storage
    wrangler secret put GCS_ACCESS_KEY_ID
    wrangler secret put GCS_SECRET_ACCESS_KEY
+   
+   # Cloudflare R2
+   wrangler secret put R2_ACCESS_KEY_ID
+   wrangler secret put R2_SECRET_ACCESS_KEY
+   wrangler secret put R2_ACCOUNT_ID
+   
+   # Azure Blob Storage (choose one authentication method)
+   wrangler secret put AZURE_STORAGE_ACCOUNT_NAME
+   wrangler secret put AZURE_STORAGE_ACCOUNT_KEY  # For Shared Key auth
+   # OR
+   wrangler secret put AZURE_SAS_TOKEN           # For SAS token auth
    ```
 
 ### Configuration
@@ -91,26 +110,76 @@ The worker supports path-based routing:
 
 - `/s3/path/to/file.jpg` - Access files from AWS S3
 - `/gcs/path/to/file.jpg` - Access files from Google Cloud Storage
+- `/r2/path/to/file.jpg` - Access files from Cloudflare R2
+- `/azure/path/to/file.jpg` - Access files from Azure Blob Storage
 
 You can customize these URL prefixes in your configuration:
 
 ```jsonc
 "vars": {
   "S3_URL_PREFIX": "/s3/",
-  "GCS_URL_PREFIX": "/gcs/"
+  "GCS_URL_PREFIX": "/gcs/",
+  "R2_URL_PREFIX": "/r2/",
+  "AZURE_URL_PREFIX": "/azure/"
 }
 ```
 
 If no path prefix matches, the worker will use the provider specified by `DEFAULT_PROVIDER` in your configuration.
 
-### HMAC Authentication
+### Authentication Methods
 
-The worker uses HMAC authentication to securely access content from AWS S3 and Google Cloud Storage. This requires:
+The worker supports different authentication methods for each storage provider:
 
-1. AWS-style credentials for both S3 and GCS (Access Key ID and Secret Access Key)
+#### AWS SignV4 Authentication
+
+For S3, GCS, and R2, the worker uses AWS SignV4 authentication through the `aws4fetch` library:
+
+1. AWS-style credentials (Access Key ID and Secret Access Key)
 2. Proper bucket configuration to allow access using these credentials
 
-The authentication is handled by the `aws4fetch` library, which signs requests according to the AWS Signature Version 4 protocol.
+#### Azure Authentication
+
+For Azure Blob Storage, the worker supports two authentication methods:
+
+1. **Shared Key Authentication**:
+   - Requires Account Name and Account Key
+   - Securely signs requests with the Azure Shared Key protocol
+   
+2. **SAS Token Authentication**:
+   - Uses a Shared Access Signature (SAS) token
+   - Ideal for providing time-limited, scoped access
+   
+#### Cloudflare R2 Worker Binding Support
+
+For Cloudflare R2, you can use direct Worker Bindings for improved performance and reduced costs:
+
+1. Configure the binding in your `wrangler.jsonc`:
+   ```jsonc
+   {
+     "r2_buckets": [
+       {
+         "binding": "MY_BUCKET",
+         "bucket_name": "your-bucket-name"
+       }
+     ]
+   }
+   ```
+
+2. Enable Worker bindings in the configuration:
+   ```jsonc
+   "vars": {
+     "R2_USE_WORKER_BINDING": true,
+     "R2_WORKER_BINDING_NAME": "MY_BUCKET"
+   }
+   ```
+
+This method allows direct access to the R2 bucket from your Worker without going through the external API, providing:
+- Lower latency (no extra HTTP requests)
+- No additional data transfer costs
+- Simplified authentication
+- Support for all R2 bucket operations
+
+The worker will automatically detect and route requests to use the Worker binding instead of making external HTTP requests.
 
 ### Caching
 
@@ -151,24 +220,32 @@ For more complex routing needs, you can define custom mappings between URL patte
 ```jsonc
 "PROVIDER_MAPPINGS": "[
   {\"pattern\":\"\\\\/images\\\\/.*\",\"provider\":\"gcs\"},
-  {\"pattern\":\"\\\\/videos\\\\/.*\",\"provider\":\"s3\"}
+  {\"pattern\":\"\\\\/videos\\\\/.*\",\"provider\":\"s3\"},
+  {\"pattern\":\"\\\\/assets\\\\/.*\",\"provider\":\"r2\"},
+  {\"pattern\":\"\\\\/docs\\\\/.*\",\"provider\":\"azure\"}
 ]"
 ```
 
 Each mapping consists of:
 - `pattern`: A regular expression to match URL paths
-- `provider`: The storage provider to use ("s3" or "gcs")
+- `provider`: The storage provider to use ("s3", "gcs", "r2", or "azure")
 
 ### Custom Endpoints
 
-You can specify custom endpoints for S3 or GCS:
+You can specify custom endpoints for any of the storage providers:
 
 ```jsonc
 "S3_ENDPOINT": "https://custom-s3-endpoint.com",
-"GCS_ENDPOINT": "https://storage.googleapis.com"
+"GCS_ENDPOINT": "https://storage.googleapis.com",
+"R2_ENDPOINT": "https://youraccountid.r2.cloudflarestorage.com",
+"AZURE_ENDPOINT": "https://youraccount.blob.core.windows.net"
 ```
 
-This is useful for S3-compatible storage providers or GCS with custom endpoints.
+This is useful for:
+- S3-compatible storage providers
+- GCS with custom endpoints
+- R2 accounts with custom domains
+- Azure Storage endpoints in different regions or private endpoints
 
 ## Development
 
@@ -221,9 +298,10 @@ The worker follows a domain-driven design approach:
 Key components:
 
 1. **Provider Factory**: Creates the appropriate provider based on configuration or URL path
-2. **Storage Providers**: Implements access to S3 and GCS through a common interface
-3. **Cache Handler**: Applies appropriate caching rules based on asset type
-4. **Request Handler**: Processes requests and applies authentication
+2. **Storage Providers**: Implements access to S3, GCS, R2, and Azure Blob Storage through a common interface
+3. **Authentication Systems**: Supports multiple authentication methods including AWS SignV4 and Azure SAS tokens
+4. **Cache Handler**: Applies appropriate caching rules based on asset type
+5. **Request Handler**: Processes requests and routes them to the appropriate provider
 
 ## Security
 

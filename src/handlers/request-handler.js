@@ -49,8 +49,14 @@ class RequestHandler {
 			const cacheHandler = new CacheHandler(this.config);
 			const cachedRequest = cacheHandler.applyRequestCaching(storageRequest);
 			
-			// Sign the request using HMAC
-			const signedRequest = await provider.signRequest(cachedRequest);
+			// Add provider-specific headers
+			const providerHeaders = provider.getRequestHeaders();
+			for (const [key, value] of Object.entries(providerHeaders)) {
+				cachedRequest.headers.set(key, value);
+			}
+			
+			// Authenticate the request using provider-specific method
+			const authenticatedRequest = await provider.authenticateRequest(cachedRequest);
 			
 			// Fetch timeout support
 			const fetchTimeout = getConfigValue(this.config, 'FETCH_TIMEOUT', 30000);
@@ -58,10 +64,67 @@ class RequestHandler {
 			const timeoutId = setTimeout(() => controller.abort(), fetchTimeout);
 			
 			try {
-				// Fetch the content from the storage provider
-				const response = await fetch(signedRequest, {
-					signal: controller.signal
-				});
+				// Check if this is an R2 Worker binding URL (r2://BINDING_NAME/path)
+				const url = new URL(authenticatedRequest.url);
+				let response;
+				
+				if (url.protocol === 'r2:') {
+					// Handle R2 binding request
+					const bindingName = url.hostname;
+					const objectKey = url.pathname.substring(1); // Remove leading /
+					
+					// Get the binding from environment
+					const r2Binding = this.config[bindingName];
+					if (!r2Binding) {
+						throw new Error(`R2 binding '${bindingName}' not found in Worker environment`);
+					}
+					
+					// Handle different request methods
+					switch (authenticatedRequest.method) {
+						case 'GET':
+							// Get the object from R2
+							const object = await r2Binding.get(objectKey);
+							if (!object) {
+								response = new Response('Not Found', { status: 404 });
+							} else {
+								// Create response with the object body and metadata
+								const headers = new Headers();
+								if (object.httpMetadata) {
+									object.writeHttpMetadata(headers);
+								}
+								headers.set('ETag', object.httpEtag);
+								response = new Response(object.body, { 
+									headers
+								});
+							}
+							break;
+						case 'HEAD':
+							// Get only metadata
+							const headObject = await r2Binding.head(objectKey);
+							if (!headObject) {
+								response = new Response('Not Found', { status: 404 });
+							} else {
+								// Create response with just metadata
+								const headers = new Headers();
+								if (headObject.httpMetadata) {
+									headObject.writeHttpMetadata(headers);
+								}
+								headers.set('ETag', headObject.httpEtag);
+								headers.set('Content-Length', headObject.size);
+								response = new Response(null, { 
+									headers
+								});
+							}
+							break;
+						default:
+							response = new Response('Method Not Allowed', { status: 405 });
+					}
+				} else {
+					// Normal fetch for non-R2 binding URLs
+					response = await fetch(authenticatedRequest, {
+						signal: controller.signal
+					});
+				}
 				
 				// Clear the timeout
 				clearTimeout(timeoutId);
@@ -71,10 +134,11 @@ class RequestHandler {
 					// Add error context in debug mode
 					if (isDebug) {
 						const errorResponse = new Response(response.body, response);
-						errorResponse.headers.set('X-Debug-Provider', provider.constructor.name);
+						errorResponse.headers.set('X-Debug-Provider', provider.getProviderName());
 						errorResponse.headers.set('X-Debug-Bucket', provider.getBucketName());
 						errorResponse.headers.set('X-Debug-Original-URL', url.pathname);
 						errorResponse.headers.set('X-Debug-Storage-URL', storageUrl);
+						errorResponse.headers.set('X-Debug-Auth-Type', provider.getAuthType());
 						return errorResponse;
 					}
 					return response;
@@ -85,10 +149,11 @@ class RequestHandler {
 				
 				// Add debug information if requested
 				if (isDebug) {
-					processedResponse.headers.set('X-Debug-Provider', provider.constructor.name);
+					processedResponse.headers.set('X-Debug-Provider', provider.getProviderName());
 					processedResponse.headers.set('X-Debug-Bucket', provider.getBucketName());
 					processedResponse.headers.set('X-Debug-Original-URL', url.pathname);
 					processedResponse.headers.set('X-Debug-Storage-URL', storageUrl);
+					processedResponse.headers.set('X-Debug-Auth-Type', provider.getAuthType());
 					processedResponse.headers.set('X-Debug-Cache-Config', JSON.stringify(cacheHandler.cacheRules));
 				}
 				

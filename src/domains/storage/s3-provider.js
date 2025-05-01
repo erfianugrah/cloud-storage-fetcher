@@ -9,6 +9,9 @@ class S3Provider extends StorageProvider {
 	constructor(config) {
 		super(config);
 		
+		// Set auth type
+		this.authType = 'aws-v4';
+		
 		const accessKeyId = getConfigValue(config, 'AWS_ACCESS_KEY_ID');
 		const secretAccessKey = getConfigValue(config, 'AWS_SECRET_ACCESS_KEY');
 		const region = getConfigValue(config, 'AWS_REGION', 'us-east-1');
@@ -20,7 +23,8 @@ class S3Provider extends StorageProvider {
 		this.aws = new AwsClient({
 			accessKeyId,
 			secretAccessKey,
-			region
+			region,
+			service: 's3'
 		});
 		
 		this.bucket = getConfigValue(config, 'S3_BUCKET');
@@ -36,14 +40,17 @@ class S3Provider extends StorageProvider {
 		if (this.pathPrefix && !this.pathPrefix.endsWith('/')) {
 			this.pathPrefix += '/';
 		}
+		
+		// Region for URL construction (may be different from signing region)
+		this.region = region;
 	}
 
 	/**
-	 * Sign a request using AWS HMAC
-	 * @param {Request} request - The request to sign
-	 * @returns {Promise<Request>} - The signed request
+	 * Authenticate a request using AWS SignV4
+	 * @param {Request} request - The request to authenticate
+	 * @returns {Promise<Request>} - The authenticated request
 	 */
-	async signRequest(request) {
+	async authenticateRequest(request) {
 		return this.aws.sign(request);
 	}
 
@@ -53,6 +60,14 @@ class S3Provider extends StorageProvider {
 	 */
 	getBucketName() {
 		return this.bucket;
+	}
+
+	/**
+	 * Get provider name
+	 * @returns {string} - Provider name
+	 */
+	getProviderName() {
+		return 's3';
 	}
 
 	/**
@@ -70,7 +85,27 @@ class S3Provider extends StorageProvider {
 		}
 		
 		// Default S3 URL format
-		return `https://${this.bucket}.s3.${this.config.AWS_REGION}.amazonaws.com/${this.pathPrefix}${path}`;
+		return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${this.pathPrefix}${path}`;
+	}
+	
+	/**
+	 * Get S3-specific headers
+	 * @returns {Object} - Headers to add to the request
+	 */
+	getRequestHeaders() {
+		return {
+			'X-Amz-Content-Sha256': 'UNSIGNED-PAYLOAD'
+		};
+	}
+	
+	/**
+	 * Check if the S3 provider supports the requested operation
+	 * @param {string} method - HTTP method
+	 * @returns {boolean} - Whether operation is supported
+	 */
+	supportsOperation(method) {
+		// S3 supports all standard HTTP methods
+		return ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'].includes(method);
 	}
 }
 
